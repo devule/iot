@@ -23,6 +23,8 @@ from config import (
     POSTGRES_USER,
     POSTGRES_PASSWORD,
 )
+from typing import Optional
+
 
 # FastAPI app setup
 app = FastAPI()
@@ -49,7 +51,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 # SQLAlchemy model
 class ProcessedAgentDataInDB(BaseModel):
-    id: int
+    id: Optional[int] = None
     road_state: str
     user_id: int
     x: float
@@ -128,7 +130,33 @@ async def send_data_to_subscribers(user_id: int, data):
 async def create_processed_agent_data(data: List[ProcessedAgentData]):
     # Insert data to database
     # Send data to subscribers
-    pass
+    entities = [
+        {
+            'road_state': item.road_state,
+            'user_id': item.agent_data.user_id,
+            'x': item.agent_data.accelerometer.x,
+            'y': item.agent_data.accelerometer.y,
+            'z': item.agent_data.accelerometer.z,
+            'latitude': item.agent_data.gps.latitude,
+            'longitude': item.agent_data.gps.longitude,
+            'timestamp': item.agent_data.timestamp,
+        }
+        for item in data
+    ]
+
+    try:
+        with SessionLocal() as session:
+            session.execute(
+                processed_agent_data.insert().values(entities)
+            )
+            session.commit()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    for item in data:
+        await send_data_to_subscribers(item.agent_data.user_id, item)
+
+    return data
 
 
 @app.get(
@@ -137,13 +165,29 @@ async def create_processed_agent_data(data: List[ProcessedAgentData]):
 )
 def read_processed_agent_data(processed_agent_data_id: int):
     # Get data by id
-    pass
+    try:
+        with SessionLocal() as session:
+            stmt = select(processed_agent_data).where(
+                processed_agent_data.c.id == processed_agent_data_id
+            )
+            result = session.execute(stmt).first()
+            if result is None:
+                raise HTTPException(status_code=404, detail="Data not found")
+            return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/processed_agent_data/", response_model=list[ProcessedAgentDataInDB])
 def list_processed_agent_data():
     # Get list of data
-    pass
+    try:
+        with SessionLocal() as session:
+            stmt = select(processed_agent_data)
+            result = session.execute(stmt).all()
+            return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put(
@@ -152,7 +196,27 @@ def list_processed_agent_data():
 )
 def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAgentData):
     # Update data
-    pass
+    try:
+        with SessionLocal() as session:
+            stmt = (
+                processed_agent_data.update()
+                    .where(processed_agent_data.c.id == processed_agent_data_id)
+                    .values(
+                        road_state=data.road_state,
+                        user_id=data.agent_data.user_id,
+                        x=data.agent_data.accelerometer.x,
+                        y=data.agent_data.accelerometer.y,
+                        z=data.agent_data.accelerometer.z,
+                        latitude=data.agent_data.gps.latitude,
+                        longitude=data.agent_data.gps.longitude,
+                        timestamp=data.agent_data.timestamp,
+                    )
+            )
+            session.execute(stmt)
+            session.commit()
+            return read_processed_agent_data(processed_agent_data_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.delete(
@@ -161,7 +225,21 @@ def update_processed_agent_data(processed_agent_data_id: int, data: ProcessedAge
 )
 def delete_processed_agent_data(processed_agent_data_id: int):
     # Delete by id
-    pass
+    try:
+        with SessionLocal() as session:
+            data = read_processed_agent_data(processed_agent_data_id)
+            stmt = (
+                processed_agent_data.delete().where(
+                    processed_agent_data.c.id == processed_agent_data_id
+                )
+            )
+            result = session.execute(stmt)
+            session.commit()
+            if result.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Data not found")
+            return data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 if __name__ == "__main__":
