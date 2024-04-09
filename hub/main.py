@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 from app.adapters.store_api_adapter import StoreApiAdapter
 from app.entities.processed_agent_data import ProcessedAgentData
+from app.entities.agent_data import AgentData
 from config import (
     STORE_API_BASE_URL,
     REDIS_HOST,
@@ -16,6 +17,8 @@ from config import (
     MQTT_BROKER_HOST,
     MQTT_BROKER_PORT,
 )
+import json
+
 
 # Configure logging settings
 logging.basicConfig(
@@ -67,8 +70,24 @@ def on_message(client, userdata, msg):
     try:
         payload: str = msg.payload.decode("utf-8")
         # Create ProcessedAgentData instance with the received data
-        processed_agent_data = ProcessedAgentData.model_validate_json(
-            payload, strict=True
+        data = json.loads(payload)
+        agent_data = data['agent_data']
+
+        processed_agent_data = ProcessedAgentData(
+            road_state=data['road_state'],
+            agent_data={
+                "user_id": data['user_id'],
+                "accelerometer": {
+                    "x": agent_data['accelerometer']['x'],
+                    "y": agent_data['accelerometer']['y'],
+                    "z": agent_data['accelerometer']['z'],
+                },
+                "gps": {
+                    "latitude": agent_data['gps']['latitude'],
+                    "longitude": agent_data['gps']['longitude'],
+                },
+                "timestamp": data['timestamp'],
+            }
         )
 
         redis_client.lpush(
